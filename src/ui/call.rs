@@ -28,6 +28,73 @@ pub const SURFACE: &str = "zapfast-call-surface";
 pub fn viewport_id() -> ViewportId {
     ViewportId::from_hash_of(SURFACE)
 }
+
+fn fallback_flag_id() -> egui::Id {
+    egui::Id::new(SURFACE).with("fallback-overlay")
+}
+
+/// Whether the call surface is currently rendered in a detached native viewport.
+pub fn is_detached(ctx: &egui::Context) -> bool {
+    !cfg!(test) && !ctx.data(|d| d.get_temp::<bool>(fallback_flag_id()).unwrap_or(false))
+}
+
+/// Whether an in-window call overlay currently covers the main chat area.
+pub fn is_in_window_overlay(app: &App, ctx: &egui::Context) -> bool {
+    app.call.is_some() && !app.call_surface_hidden && !is_detached(ctx)
+}
+
+fn draw_call_body(
+    ui: &mut egui::Ui,
+    app: &mut App,
+    call: &CallUpdate,
+    who: &Who<'_>,
+    palette: &Palette,
+    inner: Rect,
+) {
+    if call.phase == CallPhase::Incoming {
+        ringing(ui, app, call, who, palette, inner);
+    } else if call.group.is_some() && !who.people.is_empty() {
+        group_live(ui, app, call, who, palette, inner);
+    } else {
+        live(ui, app, call, who.peer, who.picture, palette, inner);
+    }
+}
+
+fn show_in_window_overlay(
+    app: &mut App,
+    ctx: &egui::Context,
+    call: &CallUpdate,
+    who: &Who<'_>,
+    palette: &Palette,
+) {
+    let screen = ctx.content_rect();
+    let screen = screen.with_min_y(screen.top() + theme::titlebar_inset(ctx));
+    egui::Area::new(egui::Id::new(SURFACE))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min)
+        .show(ctx, |ui| {
+            ui.set_min_size(screen.size());
+            let backdrop = if call.video && call.remote_video && app.call_remote_frame.is_some() {
+                Color32::BLACK
+            } else {
+                palette.window
+            };
+            ui.painter().rect_filled(screen, 0.0, backdrop);
+            ui.interact(
+                screen,
+                egui::Id::new(SURFACE).with("backdrop"),
+                egui::Sense::click_and_drag(),
+            );
+            super::caption_drag(
+                ui,
+                Rect::from_min_size(screen.min, vec2(screen.width(), theme::TOP_BAR_HEIGHT)),
+            );
+            let inner = screen.shrink(PADDING);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
+                draw_call_body(ui, app, call, who, palette, inner);
+            });
+        });
+}
 /// Padding between the window edge and everything the surface draws.
 const PADDING: f32 = 24.0;
 /// The round controls along the bottom.
@@ -68,59 +135,27 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     let me = app.call_self();
     let caller = app.call_caller_name();
 
-    if cfg!(test) {
-        let screen = ctx.content_rect();
-        let screen = screen.with_min_y(screen.top() + theme::titlebar_inset(ctx));
-        egui::Area::new(egui::Id::new(SURFACE))
-            .order(egui::Order::Foreground)
-            .fixed_pos(screen.min)
-            .show(ctx, |ui| {
-                ui.set_min_size(screen.size());
-                let backdrop = if call.video && call.remote_video && app.call_remote_frame.is_some()
-                {
-                    Color32::BLACK
-                } else {
-                    palette.window
-                };
-                ui.painter().rect_filled(screen, 0.0, backdrop);
-                ui.interact(
-                    screen,
-                    egui::Id::new(SURFACE).with("backdrop"),
-                    egui::Sense::click_and_drag(),
-                );
-                super::caption_drag(
-                    ui,
-                    Rect::from_min_size(screen.min, vec2(screen.width(), theme::TOP_BAR_HEIGHT)),
-                );
-                let inner = screen.shrink(PADDING);
-                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                    let picture = picture.as_deref();
-                    let who = Who {
-                        peer: &peer,
-                        picture,
-                        caller: caller.as_deref(),
-                        people: &people,
-                        me: me.as_ref(),
-                    };
-                    if call.phase == CallPhase::Incoming {
-                        ringing(ui, app, &call, &who, &palette, inner);
-                    } else if call.group.is_some() && !people.is_empty() {
-                        group_live(ui, app, &call, &who, &palette, inner);
-                    } else {
-                        live(ui, app, &call, &peer, picture, &palette, inner);
-                    }
-                });
-            });
+    let picture_ref = picture.as_deref();
+    let who = Who {
+        peer: &peer,
+        picture: picture_ref,
+        caller: caller.as_deref(),
+        people: &people,
+        me: me.as_ref(),
+    };
+
+    if !is_detached(ctx) {
+        show_in_window_overlay(app, ctx, &call, &who, &palette);
         return;
     }
 
     let initial_size = if call.video {
-        vec2(640.0, 480.0)
+        vec2(680.0, 480.0)
     } else {
         vec2(360.0, 520.0)
     };
     let min_size = if call.video {
-        vec2(360.0, 280.0)
+        vec2(460.0, 320.0)
     } else {
         vec2(300.0, 420.0)
     };
@@ -141,51 +176,53 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .with_app_id(app_id);
 
     ctx.set_embed_viewports(false);
-    ctx.show_viewport_immediate(viewport_id(), builder, |ui, class| {
-        if class == egui::ViewportClass::EmbeddedWindow {
-            return;
-        }
-
-        if ui.input(|i| i.viewport().close_requested()) {
-            ui.send_viewport_cmd(egui::ViewportCommand::Close);
-            if call.phase == CallPhase::Incoming {
-                app.actions.push(Action::DeclineCall);
-            } else {
-                app.actions.push(Action::HangupCall);
+    let mut embedded = false;
+    let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.show_viewport_immediate(viewport_id(), builder, |ui, class| {
+            if class == egui::ViewportClass::EmbeddedWindow {
+                embedded = true;
+                return;
             }
-        }
 
-        // A peer's picture is letterboxed in black, as any video is.
-        let backdrop = if call.video && call.remote_video && app.call_remote_frame.is_some() {
-            Color32::BLACK
-        } else {
-            palette.window
-        };
+            if ui.input(|i| i.viewport().close_requested()) {
+                if call.phase == CallPhase::Incoming {
+                    app.actions.push(Action::DeclineCall);
+                } else {
+                    app.actions.push(Action::HangupCall);
+                }
+            }
 
-        egui::CentralPanel::default()
-            .frame(Frame::NONE.fill(backdrop))
-            .show(ui, |ui| {
-                let screen = ui.max_rect();
-                let inner = screen.shrink(PADDING);
-                ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                    let picture = picture.as_deref();
-                    let who = Who {
-                        peer: &peer,
-                        picture,
-                        caller: caller.as_deref(),
-                        people: &people,
-                        me: me.as_ref(),
-                    };
-                    if call.phase == CallPhase::Incoming {
-                        ringing(ui, app, &call, &who, &palette, inner);
-                    } else if call.group.is_some() && !people.is_empty() {
-                        group_live(ui, app, &call, &who, &palette, inner);
-                    } else {
-                        live(ui, app, &call, &peer, picture, &palette, inner);
-                    }
+            if !egui::Popup::is_any_open(ui.ctx()) && ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
+                if app.call_fullscreen {
+                    app.actions.push(Action::ToggleCallFullscreen);
+                } else if call.phase.is_live() {
+                    app.actions.push(Action::LeaveCallSurface);
+                }
+            }
+
+            let backdrop = if call.video && call.remote_video && app.call_remote_frame.is_some() {
+                Color32::BLACK
+            } else {
+                palette.window
+            };
+
+            egui::CentralPanel::default()
+                .frame(Frame::NONE.fill(backdrop))
+                .show(ui, |ui| {
+                    let screen = ui.max_rect();
+                    let inner = screen.shrink(PADDING);
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
+                        draw_call_body(ui, app, &call, &who, &palette, inner);
+                    });
                 });
-            });
-    });
+        });
+    }));
+
+    if rendered.is_err() || embedded {
+        ctx.data_mut(|d| d.insert_temp(fallback_flag_id(), true));
+        show_in_window_overlay(app, ctx, &call, &who, &palette);
+    }
 }
 
 /// The strip a call keeps at the bottom of the window while the reader is
@@ -368,7 +405,7 @@ fn live(
     let controls_row = bottom_row(ui, area, CONTROL, |ui| controls(ui, app, call, palette));
     if app.call_devices_open && call.phase.is_live() {
         let above = area.with_max_y(controls_row.top() - 20.0);
-        bottom_row(ui, above, PICKER_HEIGHT, |ui| {
+        bottom_block(ui, above, devices_height(above.width(), call.video), |ui| {
             devices(ui, app, call, palette)
         });
     }
@@ -461,6 +498,24 @@ fn bottom_row(ui: &mut egui::Ui, area: Rect, height: f32, add: impl FnOnce(&mut 
         egui::UiBuilder::new()
             .max_rect(rect)
             .layout(Layout::left_to_right(Align::Center)),
+        add,
+    );
+    rect
+}
+
+/// Top-aligned block of `height` anchored to the bottom of `area`, used for
+/// wrapped device pickers so multi-row blocks grow from the top of their slot.
+fn bottom_block(
+    ui: &mut egui::Ui,
+    area: Rect,
+    height: f32,
+    add: impl FnOnce(&mut egui::Ui),
+) -> Rect {
+    let rect = Rect::from_min_max(egui::pos2(area.left(), area.bottom() - height), area.max);
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(Layout::top_down(Align::Min)),
         add,
     );
     rect
@@ -681,7 +736,6 @@ fn controls(ui: &mut egui::Ui, app: &mut App, call: &CallUpdate, palette: &Palet
         )
         .clicked()
         {
-            ui.send_viewport_cmd(egui::ViewportCommand::Close);
             app.actions.push(Action::HangupCall);
         }
     }
@@ -714,41 +768,45 @@ fn devices(ui: &mut egui::Ui, app: &mut App, call: &CallUpdate, palette: &Palett
     {
         let pickers = if call.video { 3.0 } else { 2.0 };
         let width = pickers * PICKER + (pickers - 1.0) * 16.0;
-        ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
-        Picker {
-            salt: "call-microphone",
-            icon: Icon::Mic,
-            title: &gettext(locale, "Microphone"),
-            default_label: &default_label,
-            current: call.microphone.as_deref(),
-            devices: &microphones,
-            palette,
-        }
-        .show(ui, &mut actions, Action::SetCallMicrophone);
-        ui.add_space(16.0);
-        Picker {
-            salt: "call-speaker",
-            icon: Icon::Volume2,
-            title: &gettext(locale, "Speaker"),
-            default_label: &default_label,
-            current: call.speaker.as_deref(),
-            devices: &speakers,
-            palette,
-        }
-        .show(ui, &mut actions, Action::SetCallSpeaker);
-        if call.video {
-            ui.add_space(16.0);
+        let available = ui.available_width();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(16.0, 8.0);
+            if available > width {
+                ui.add_space((available - width) * 0.5);
+            }
             Picker {
-                salt: "call-camera",
-                icon: Icon::Video,
-                title: &gettext(locale, "Camera"),
-                default_label: &gettext(locale, "First camera"),
-                current: call.camera.as_deref(),
-                devices: &cameras,
+                salt: "call-microphone",
+                icon: Icon::Mic,
+                title: &gettext(locale, "Microphone"),
+                default_label: &default_label,
+                current: call.microphone.as_deref(),
+                devices: &microphones,
                 palette,
             }
-            .show(ui, &mut actions, Action::SetCallCameraDevice);
-        }
+            .show(ui, &mut actions, Action::SetCallMicrophone);
+            Picker {
+                salt: "call-speaker",
+                icon: Icon::Volume2,
+                title: &gettext(locale, "Speaker"),
+                default_label: &default_label,
+                current: call.speaker.as_deref(),
+                devices: &speakers,
+                palette,
+            }
+            .show(ui, &mut actions, Action::SetCallSpeaker);
+            if call.video {
+                Picker {
+                    salt: "call-camera",
+                    icon: Icon::Video,
+                    title: &gettext(locale, "Camera"),
+                    default_label: &gettext(locale, "First camera"),
+                    current: call.camera.as_deref(),
+                    devices: &cameras,
+                    palette,
+                }
+                .show(ui, &mut actions, Action::SetCallCameraDevice);
+            }
+        });
     }
     app.actions.extend(actions);
 }
@@ -756,6 +814,14 @@ fn devices(ui: &mut egui::Ui, app: &mut App, call: &CallUpdate, palette: &Palett
 /// The width of one device picker, and the height of the row they make.
 const PICKER: f32 = 200.0;
 const PICKER_HEIGHT: f32 = 60.0;
+
+fn devices_height(available_width: f32, video: bool) -> f32 {
+    let count: usize = if video { 3 } else { 2 };
+    let gap = 16.0;
+    let per_row = (((available_width + gap) / (PICKER + gap)).floor() as usize).max(1);
+    let rows = count.div_ceil(per_row);
+    rows as f32 * PICKER_HEIGHT + rows.saturating_sub(1) as f32 * 8.0
+}
 
 /// One device picker: its title with an icon, and what the machine has.
 struct Picker<'a> {
@@ -887,10 +953,10 @@ fn ringing(
             Color32::WHITE,
             &decline,
             palette,
+            true,
         )
         .clicked()
         {
-            ui.send_viewport_cmd(egui::ViewportCommand::Close);
             app.actions.push(Action::DeclineCall);
         }
         let accept = gettext(locale, "Accept");
@@ -901,6 +967,7 @@ fn ringing(
             palette.on_accent,
             &accept,
             palette,
+            !app.call_being_answered(),
         )
         .clicked()
         {
@@ -1059,7 +1126,7 @@ fn group_live(
     let mut bottom = controls_row.top() - 20.0;
     if app.call_devices_open && call.phase.is_live() {
         let above = area.with_max_y(controls_row.top() - 20.0);
-        let pickers = bottom_row(ui, above, PICKER_HEIGHT, |ui| {
+        let pickers = bottom_block(ui, above, devices_height(above.width(), call.video), |ui| {
             devices(ui, app, call, palette)
         });
         bottom = pickers.top() - 16.0;
@@ -1338,13 +1405,14 @@ fn answer(
     tint: Color32,
     label: &str,
     palette: &Palette,
+    enabled: bool,
 ) -> egui::Response {
     ui.allocate_ui_with_layout(
         vec2(CONTROL, CONTROL + 26.0),
         Layout::top_down(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
-            let response = control(ui, icon, fill, tint, label, true);
+            let response = control(ui, icon, fill, tint, label, enabled);
             theme::text(ui, label, theme::medium(13.0), palette.secondary);
             response
         },

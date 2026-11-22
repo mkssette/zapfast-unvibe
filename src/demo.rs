@@ -2885,6 +2885,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.update = Some(crate::updates::Release {
                     version: "99.0.0".to_owned(),
                     url: "https://github.com/mkssette/zapfast-unvibe/releases/latest".to_owned(),
+                    published_at: None,
                 });
                 app.show_update = true;
                 let installation = Installation {
@@ -4656,7 +4657,7 @@ mod tests {
         let from_the_dots = |causes: &[egui::RepaintCause]| {
             causes
                 .iter()
-                .any(|cause| cause.file.ends_with("conversation.rs"))
+                .any(|cause| cause.file.ends_with("messages.rs"))
         };
         let (plain, causes) = run(false);
         assert_eq!(plain, std::time::Duration::ZERO, "{causes:?}");
@@ -22224,10 +22225,9 @@ mod tests {
             strip.expect("the strip is drawn"),
             pill.expect("the composer"),
         );
-        let gap = pill.top() - strip.bottom();
         assert!(
-            (gap - crate::ui::conversation::STRIP_GAP).abs() < 0.5,
-            "the strip ends {gap} above the composer"
+            pill.contains_rect(strip),
+            "the reply drawer {strip:?} sits inside the composer pill {pill:?}"
         );
     }
 

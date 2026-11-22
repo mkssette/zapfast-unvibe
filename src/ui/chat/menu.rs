@@ -221,7 +221,7 @@ pub(crate) fn quick_reactions<'a>(
         .map(|(emoji, _)| emoji.as_str())
         .chain(QUICK_REACTIONS.iter().copied())
     {
-        if emojis::get(emoji).is_some() && !list.contains(&emoji) {
+        if crate::emoji::lookup(emoji).is_some() && !list.contains(&emoji) {
             list.push(emoji);
         }
         if list.len() == QUICK_REACTIONS.len() {
@@ -312,6 +312,7 @@ pub(crate) fn draw_context_separator(ui: &mut egui::Ui, palette: &Palette, heigh
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_context_row(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -902,10 +903,12 @@ pub(crate) fn context_menu(
         (!ui.is_sizing_pass()).then_some(first).flatten()
     });
 
-    let chat = &view.chat.id;
-    ui.ctx().data_mut(|data| {
-        data.insert_temp(menu_first_item_id(chat, &message.id), first);
-    });
+    if !matches!(message.content, Content::Call { .. }) {
+        let chat = &view.chat.id;
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(menu_first_item_id(chat, &message.id), first);
+        });
+    }
 }
 
 pub(crate) struct InnerEntry {

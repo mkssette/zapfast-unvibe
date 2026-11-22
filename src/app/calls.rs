@@ -193,6 +193,14 @@ impl App {
             .map(|owner| &owner.backend)
     }
 
+    /// Whether the call on screen is being answered: Accept was clicked and
+    /// the call is not up yet.
+    pub fn call_being_answered(&self) -> bool {
+        self.call
+            .as_ref()
+            .is_some_and(|call| self.call_answering == Some(call.generation))
+    }
+
     /// Sends a command to the call's own account, whichever is on screen.
     pub(super) fn send_call_command(&self, command: Command) {
         if let Some(backend) = self.call_backend() {
@@ -205,8 +213,12 @@ impl App {
     fn set_call_fullscreen(&mut self, ctx: &egui::Context, fullscreen: bool) {
         if self.call_fullscreen != fullscreen {
             self.call_fullscreen = fullscreen;
-            let viewport_id = crate::ui::call::viewport_id();
-            ctx.send_viewport_cmd_to(viewport_id, egui::ViewportCommand::Fullscreen(fullscreen));
+            let cmd = egui::ViewportCommand::Fullscreen(fullscreen);
+            if crate::ui::call::is_detached(ctx) {
+                ctx.send_viewport_cmd_to(crate::ui::call::viewport_id(), cmd);
+            } else {
+                ctx.send_viewport_cmd(cmd);
+            }
         }
     }
 
@@ -693,7 +705,15 @@ impl App {
             Action::SetCallCameraDevice(device) => {
                 self.send_call_command(Command::SetCallCameraDevice(device));
             }
-            Action::AnswerCall => self.send_call_command(Command::AnswerCall),
+            Action::AnswerCall => {
+                if let Some(call) = self.call.as_ref()
+                    && call.phase == CallPhase::Incoming
+                    && self.call_answering != Some(call.generation)
+                {
+                    self.call_answering = Some(call.generation);
+                    self.send_call_command(Command::AnswerCall);
+                }
+            }
             Action::DeclineCall => {
                 self.send_call_command(Command::DeclineCall);
                 self.dismiss_call();
