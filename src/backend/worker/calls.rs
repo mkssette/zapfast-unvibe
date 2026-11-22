@@ -193,8 +193,24 @@ impl Worker {
         update
     }
 
-    /// Whether a call is already up, which every entry point refuses to double.
+    /// Ends the call ringing here if its ring lapsed with no word of its end (see
+    /// [`calls::Call::ring_lapsed`]), filing it as missed, so it no longer holds the call slot.
+    pub(super) fn let_lapsed_ring_go(&mut self) {
+        let now = std::time::Instant::now();
+        let update = self
+            .call
+            .as_mut()
+            .filter(|runtime| runtime.call.ring_lapsed(now))
+            .and_then(|runtime| runtime.call.lapse_ring());
+        if let Some(update) = update {
+            self.emit_call(update);
+        }
+    }
+
+    /// Whether a call is already up, which every entry point refuses to double. A ring that lapsed
+    /// is let go first: it is not a call, and it must not refuse every one that follows.
     pub(super) fn call_busy(&mut self) -> bool {
+        self.let_lapsed_ring_go();
         if self.call.is_some() {
             log::warn!("[CALL] refusing a new call: one is already up");
             return true;
@@ -446,6 +462,16 @@ impl Worker {
     }
 
     pub(super) async fn answer_call(&mut self) {
+        // A second Accept that arrived while the first was being answered finds the offer already
+        // spent. The call it names is the one just picked up, so it is not ours to fail.
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|runtime| !runtime.call.answerable())
+        {
+            log::info!("[CALL] ignoring an answer for a call that is no longer ringing");
+            return;
+        }
         let Some(client) = self.client.clone() else {
             return;
         };
@@ -907,6 +933,8 @@ impl Worker {
     /// The fresh list is also published when it changed, so a device that came or went shows up in
     /// the pickers without anyone pressing anything.
     pub(super) async fn reconcile_call(&mut self) {
+        // A ring whose end never arrived goes on the heartbeat too, so its surface does not stay up.
+        self.let_lapsed_ring_go();
         if self
             .call
             .as_ref()

@@ -77,7 +77,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         // The day filter keeps egui's own order among its days.
         && !app.chat_search_calendar
         // The call screen covers the chats.
-        && (app.call.is_none() || app.call_surface_hidden)
+        && !call::is_in_window_overlay(app, ctx)
         // A name typed in the info panel keeps Tab between its fields.
         && !(app.info_visible()
             && (app.contact_edit.is_some()
@@ -172,8 +172,8 @@ fn main_view(app: &mut App, ui: &mut egui::Ui, list_only: bool) {
     let sidebar_visible = full_list || sidebar_t > 0.001;
 
     let mut list_width = chats::compact_width(ui.ctx());
-    if sidebar_visible {
-        list_width += app.settings.sidebar_width * pane::ease_out_cubic(sidebar_t);
+    if full_list {
+        list_width += app.settings.sidebar_width;
     }
     let crowded = app.info_visible()
         && ui.available_width() - list_width < pane::INFO_MIN + pane::INFO_CONVERSATION_MIN;

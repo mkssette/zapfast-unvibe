@@ -270,6 +270,8 @@ impl Conversation {
         // Prepend new older rows, but refresh duplicates too: on-demand
         // history can supply edits and phone ordering absent from our archive.
         let old_len = self.messages.len();
+        let track_arrivals = !older && (self.initial_loaded || old_len > 0);
+        let now = track_arrivals.then(Instant::now);
         let mut positions: HashMap<String, usize> = self
             .messages
             .iter()
@@ -296,10 +298,19 @@ impl Conversation {
                     }
                 }
                 None => {
+                    if let Some(at) = now {
+                        self.arrivals.insert(message.id.clone(), at);
+                    }
                     positions.insert(message.id.clone(), self.messages.len());
                     self.messages.push(message);
                 }
             }
+        }
+        if !older {
+            if track_arrivals {
+                self.arrivals.retain(|_, at| at.elapsed().as_secs() < 5);
+            }
+            self.initial_loaded = true;
         }
         if older {
             let added = self.messages.len() - old_len;
@@ -882,6 +893,8 @@ pub struct App {
     /// its ringtone plays: notifications on, a sound chosen, and a chat that
     /// is not muted, archived or locked.
     call_rings: Option<u64>,
+    /// The incoming call (by generation) whose Accept was clicked.
+    call_answering: Option<u64>,
     /// The ringback and ringtone, played on the default output in the real
     /// app and only tracked in tests and demos.
     call_tones: crate::call_tones::Tones,
@@ -916,6 +929,9 @@ pub struct App {
     tray_allowed: bool,
     /// The tray item could not be made while the setting wants one.
     tray_failed: bool,
+    /// Dock clicks on macOS, which bring a closed window back with or without
+    /// a menu-bar item. `None` elsewhere, and in tests and demos.
+    dock: Option<fastframe_tray::Dock>,
     /// The unread level the tray icon shows (`util::tray_badge_level`).
     tray_badge: u32,
     /// A new window asks for the focus with its first frame.
@@ -1282,6 +1298,10 @@ fn cycled(active: usize, len: usize, step: i8) -> Option<usize> {
 /// How long a hidden start waits for a panel to show the tray item.
 const TRAY_WAIT: Duration = Duration::from_secs(30);
 
+/// How long quitting waits for the accounts' runtimes to finish their
+/// work and disconnect.
+const QUIT_WAIT: Duration = Duration::from_secs(10);
+
 const TRAY_SHOW: &str = "show";
 const TRAY_LOCK: &str = "lock";
 const TRAY_QUIT: &str = "quit";
@@ -1344,6 +1364,10 @@ fn tray_config(lockable: bool) -> fastframe_tray::Config {
 /// on Windows, and an item dropped elsewhere stays with a dead menu.
 fn wants_tray_item(allowed: bool, keep_running: bool, exists: bool) -> bool {
     allowed && keep_running && !exists
+}
+
+fn closing_keeps_running(dock: bool, tray_shown: bool, keep_running: bool) -> bool {
+    dock || (tray_shown && keep_running)
 }
 
 /// How often the panel's light or dark style is read again.
@@ -1444,6 +1468,10 @@ impl App {
         }
         app.tray_allowed = options.tray;
         app.spawn_tray_if_wanted();
+        if cfg!(target_os = "macos") && options.tray {
+            let dock_waker = waker.clone();
+            app.dock = Some(fastframe_tray::Dock::spawn(move || dock_waker.wake()));
+        }
         // The clock preference may wait on the desktop portal on Linux; keep
         // it off the first frame.
         std::thread::Builder::new()
@@ -1764,6 +1792,7 @@ impl App {
             call_fullscreen: false,
             call_notified: None,
             call_rings: None,
+            call_answering: None,
             call_tones: Default::default(),
             call_dismissed: None,
             call_cancel: None,
@@ -1780,6 +1809,7 @@ impl App {
             tray: None,
             tray_allowed: false,
             tray_failed: false,
+            dock: None,
             tray_badge: 0,
             wants_focus: false,
             account_wheeled: None,
@@ -2287,6 +2317,10 @@ impl App {
         // The window is gone with the full screen it was in; a new one starts
         // at its normal size.
         self.call_fullscreen = false;
+        #[cfg(target_os = "linux")]
+        if let Some(clipboard) = self.clipboard_reader.wayland.take() {
+            crate::platform::clipboard::keep_after_window(clipboard);
+        }
     }
 
     /// What the conversation shows behind its bubbles, for the chat and the
@@ -2311,9 +2345,13 @@ impl App {
         }
     }
 
-    /// Whether window close keeps the app in the tray.
-    pub fn hides_to_tray(&self) -> bool {
-        self.tray_shown() && self.settings.keep_running_in_background
+    /// Whether closing the window keeps ZapFast running, hidden.
+    pub fn keeps_running_on_close(&self) -> bool {
+        closing_keeps_running(
+            self.dock.is_some(),
+            self.tray_shown(),
+            self.settings.keep_running_in_background,
+        )
     }
 
     /// Asks the compositor to bring the existing window forward, which niri
@@ -3510,7 +3548,7 @@ impl App {
                 // not a query to match.
                 (self.locked_folder && !self.chat_lock_authenticated())
                     || needle.is_empty()
-                    || self.text_matches(&self.chat_title(chat), &needle)
+                    || self.name_matches(&self.chat_title(chat), &needle)
                     || chat.phone().is_some_and(|phone| phone.contains(&needle))
                     || chat
                         .last
@@ -3568,7 +3606,7 @@ impl App {
             .filter(|contact| {
                 contact
                     .display_name()
-                    .is_some_and(|name| self.text_matches(name, &needle))
+                    .is_some_and(|name| self.name_matches(name, &needle))
                     || contact
                         .id
                         .split('@')
@@ -4035,20 +4073,6 @@ impl App {
                 let messages_empty = messages.is_empty();
                 if older && !messages.is_empty() {
                     conversation.phone_delivered = true;
-                }
-                if !older {
-                    if conversation.initial_loaded || !was_empty {
-                        let now = Instant::now();
-                        for msg in &messages {
-                            if !conversation.messages.iter().any(|m| m.id == msg.id) {
-                                conversation.arrivals.insert(msg.id.clone(), now);
-                            }
-                        }
-                        conversation
-                            .arrivals
-                            .retain(|_, at| at.elapsed().as_secs() < 5);
-                    }
-                    conversation.initial_loaded = true;
                 }
                 conversation.merge(messages, older);
                 if older {
@@ -4958,7 +4982,11 @@ impl App {
                 }
             }
             Event::UpdateAvailable { version, url } => {
-                let notice = crate::updates::Release { version, url };
+                let notice = crate::updates::Release {
+                    version,
+                    url,
+                    published_at: None,
+                };
                 if self.update.as_ref() != Some(&notice) {
                     self.toast(format!("ZapFast {} is available", notice.version));
                 }
@@ -5671,13 +5699,23 @@ impl App {
     /// Whether `text` holds `needle` once both are normalized, remembering
     /// the normalized form so the next frame does not pay for it again.
     fn text_matches(&self, text: &str, needle: &str) -> bool {
+        self.cached_key(text, |key| key.contains(needle))
+    }
+
+    /// Whether a name finds `needle` as the whole text or word by word (see
+    /// `util::search_matches`), sharing `text_matches`' cache.
+    fn name_matches(&self, name: &str, needle: &str) -> bool {
+        self.cached_key(name, |key| crate::util::search_matches(key, needle))
+    }
+
+    fn cached_key(&self, text: &str, hit: impl Fn(&str) -> bool) -> bool {
         if let Some(key) = self.search_keys.borrow().get(text) {
-            return key.contains(needle);
+            return hit(key.as_str());
         }
         let key = crate::util::search_key(text);
-        let hit = key.contains(needle);
+        let found = hit(key.as_str());
         self.search_keys.borrow_mut().insert(text.to_owned(), key);
-        hit
+        found
     }
 
     /// Asks the archive to be scanned for the chat list's search text.
@@ -7214,7 +7252,7 @@ impl App {
         // for a minimized window: closing one from the taskbar quit instead.
         if ctx.input(|input| input.viewport().close_requested())
             && !self.quit_requested
-            && self.hides_to_tray()
+            && self.keeps_running_on_close()
         {
             self.hide_intent = true;
         }
@@ -11977,7 +12015,11 @@ impl App {
             crate::media_pause::settle(Duration::from_secs(2));
         }
         for account in &mut self.accounts {
-            account.backend.shutdown();
+            account.backend.request_shutdown();
+        }
+        let deadline = Instant::now() + QUIT_WAIT;
+        for account in &mut self.accounts {
+            account.backend.wait_for_shutdown(deadline);
         }
         self.files.flush(fastframe_file::FLUSH_TIMEOUT);
     }
@@ -18143,12 +18185,12 @@ mod tests {
         let mut app = app();
         assert!(app.settings.keep_running_in_background);
         app.test_tray_shown = Some(false);
-        assert!(!app.hides_to_tray());
+        assert!(!app.keeps_running_on_close());
         app.apply(Action::HideWindow, &ctx);
         assert!(!app.hide_intent);
 
         app.test_tray_shown = Some(true);
-        assert!(app.hides_to_tray());
+        assert!(app.keeps_running_on_close());
         app.apply(Action::HideWindow, &ctx);
         assert!(app.hide_intent);
         app.hide_intent = false;
@@ -18156,7 +18198,7 @@ mod tests {
         assert!(app.hide_intent);
 
         app.settings.keep_running_in_background = false;
-        assert!(!app.hides_to_tray(), "the setting still decides");
+        assert!(!app.keeps_running_on_close(), "the setting still decides");
         assert!(!Resident::start_hidden(&mut app));
     }
 
@@ -19067,6 +19109,7 @@ mod tests {
         app.update = Some(crate::updates::Release {
             version: "99.0.0".into(),
             url: "https://github.com/mkssette/zapfast-unvibe/releases/latest".into(),
+            published_at: None,
         });
         app.update_support = Some(Err("Use your package manager".into()));
         app.settings.download_updates_automatically = true;

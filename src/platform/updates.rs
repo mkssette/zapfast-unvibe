@@ -51,7 +51,7 @@ mod tests {
     fn update_config_is_valid() {
         CONFIG.validate().unwrap();
         assert_eq!(CONFIG.current_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(CONFIG.slug, "zapfast");
+        assert_eq!(CONFIG.slug, "zapfast-unvibe");
     }
 
     #[test]

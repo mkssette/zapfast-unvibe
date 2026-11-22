@@ -63,6 +63,8 @@ mod prefetch;
 mod star_recovery;
 mod sticker_pace;
 mod stickers;
+#[cfg(test)]
+mod write_batching;
 
 use super::{
     Command, Event, GroupEdit, LinkStatus, MessageRemovalOutcome, Refusal, SendTurn, Unsent, Waker,
@@ -1172,32 +1174,7 @@ pub async fn run(
                     Some(command) => worker.handle_command(command).await,
                 }
             }
-            Some(event) = wa_events.recv() => match event {
-                RuntimeEvent::WhatsApp { session, event } => {
-                    worker.whatsapp_event(session, event).await;
-                }
-                RuntimeEvent::MessageRemoval { generation, event } => {
-                    worker.handle_session_deletion(generation, event).await;
-                }
-                RuntimeEvent::PreferencesRecovered {
-                    generation,
-                    locks,
-                    complete,
-                } => {
-                    worker.preferences_recovered(generation, locks, complete);
-                }
-                RuntimeEvent::FavoriteChatsRead { generation, complete } => {
-                    worker.favorite_chats_read(generation, complete);
-                }
-                RuntimeEvent::LinkPreviewsRead { generation, complete } => {
-                    worker.link_previews_read(generation, complete);
-                }
-                RuntimeEvent::PresenceSent {
-                    generation,
-                    online,
-                    succeeded,
-                } => worker.presence_sent(generation, online, succeeded),
-            },
+            Some(event) = wa_events.recv() => worker.runtime_events(event, &mut wa_events).await,
             Some(event) = async {
                 match call_events.as_mut() {
                     Some(events) => events.recv().await.ok(),
@@ -3692,6 +3669,108 @@ impl Worker {
             return Some(name);
         }
         crate::model::phone_of(id).map(crate::util::phone)
+    }
+}
+
+const EVENT_BATCH: usize = 500;
+const EVENT_BATCH_TIME: Duration = Duration::from_millis(250);
+
+impl Worker {
+    async fn runtime_events(
+        &mut self,
+        first: RuntimeEvent,
+        waiting: &mut mpsc::UnboundedReceiver<RuntimeEvent>,
+    ) {
+        let batched = self.open_batch();
+        self.runtime_event(first).await;
+        let started = Instant::now();
+        for _ in 1..EVENT_BATCH {
+            if started.elapsed() >= EVENT_BATCH_TIME {
+                break;
+            }
+            let Ok(event) = waiting.try_recv() else {
+                break;
+            };
+            self.runtime_event(event).await;
+        }
+        self.close_batch(batched);
+    }
+
+    async fn runtime_event(&mut self, event: RuntimeEvent) {
+        match event {
+            RuntimeEvent::WhatsApp { session, event } => {
+                self.whatsapp_event(session, event).await;
+            }
+            RuntimeEvent::MessageRemoval { generation, event } => {
+                self.handle_session_deletion(generation, event).await;
+            }
+            RuntimeEvent::PreferencesRecovered {
+                generation,
+                locks,
+                complete,
+            } => {
+                self.preferences_recovered(generation, locks, complete);
+            }
+            RuntimeEvent::FavoriteChatsRead {
+                generation,
+                complete,
+            } => {
+                self.favorite_chats_read(generation, complete);
+            }
+            RuntimeEvent::LinkPreviewsRead {
+                generation,
+                complete,
+            } => {
+                self.link_previews_read(generation, complete);
+            }
+            RuntimeEvent::PresenceSent {
+                generation,
+                online,
+                succeeded,
+            } => self.presence_sent(generation, online, succeeded),
+        }
+    }
+
+    fn open_batch(&self) -> bool {
+        match self.archive.begin_batch() {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("archive writes not batched: {error}");
+                false
+            }
+        }
+    }
+
+    fn close_batch(&self, batched: bool) {
+        if batched && let Err(error) = self.archive.end_batch() {
+            log::warn!("could not commit a batch of archive writes: {error}");
+        }
+    }
+
+    /// The name each person `base` mentions goes by here, keyed by the user
+    /// part its `@` token shows: their contact name, else the name on their
+    /// profile, else their formatted number.
+    fn forward_mention_names(&self, base: &wa::Message) -> Vec<(String, String)> {
+        let nonempty = |name: &Option<String>| name.clone().filter(|name| !name.is_empty());
+        mentioned_of(base)
+            .into_iter()
+            .filter_map(|jid| {
+                let user = jid.split('@').next().filter(|user| !user.is_empty())?;
+                let id = self.canonical_str(&jid);
+                let phone = || crate::model::phone_of(&id).map(crate::util::phone);
+                let name = if id == self.me() || self.is_me(&id) {
+                    nonempty(&self.me_name).or_else(phone)
+                } else {
+                    let contact = self.contacts.get(&id).or_else(|| self.contacts.get(&jid));
+                    contact
+                        .and_then(|contact| {
+                            nonempty(&contact.full_name).or_else(|| nonempty(&contact.push_name))
+                        })
+                        .or_else(phone)
+                }?;
+                Some((user.to_owned(), name))
+            })
+            .collect()
     }
 
     /// Returns the best current chat name.
@@ -6251,6 +6330,17 @@ impl Worker {
         parsed: ParsedHistory,
         metadata: bool,
     ) -> Vec<(ChatId, usize, Option<bool>)> {
+        let batched = self.open_batch();
+        let filed = self.file_history(parsed, metadata);
+        self.close_batch(batched);
+        filed
+    }
+
+    fn file_history(
+        &mut self,
+        parsed: ParsedHistory,
+        metadata: bool,
+    ) -> Vec<(ChatId, usize, Option<bool>)> {
         // Chats whose listed pictures, documents or links changed, told
         // once each rather than once per imported message.
         let mut media_changed_in: HashSet<ChatId> = HashSet::new();
@@ -8181,12 +8271,18 @@ impl Worker {
                 let jid = Jid::pn(&phone);
                 let generation = self.contact_generation;
                 tokio::spawn(async move {
-                    // Use WhatsApp's registration check before opening the chat.
                     let registered = client
                         .contacts()
                         .is_on_whatsapp(&[jid])
                         .await
-                        .map(|results| results.iter().any(|result| result.is_registered))
+                        .map(|results| {
+                            results
+                                .iter()
+                                .find(|result| result.is_registered)
+                                .map(|result| {
+                                    registered_number(&phone, &result.jid, result.pn_jid.as_ref())
+                                })
+                        })
                         .map_err(|_| "Could not check the number. Please try again.".to_owned());
                     let _ = commands.send(Command::ContactChecked {
                         generation,
@@ -8202,7 +8298,7 @@ impl Worker {
             Command::ContactChecked {
                 generation,
                 request,
-                phone,
+                phone: _,
                 full_name,
                 first_name,
                 to_phone,
@@ -8211,9 +8307,9 @@ impl Worker {
                 if generation != self.contact_generation {
                     return;
                 }
-                match registered {
-                    Ok(true) => {}
-                    Ok(false) => {
+                let number = match registered {
+                    Ok(Some(number)) => number,
+                    Ok(None) => {
                         self.emit(Event::ContactFailed {
                             request,
                             error: "This number is not on WhatsApp".to_owned(),
@@ -8224,8 +8320,8 @@ impl Worker {
                         self.emit(Event::ContactFailed { request, error });
                         return;
                     }
-                }
-                let id = format!("{phone}@s.whatsapp.net");
+                };
+                let id = format!("{number}@s.whatsapp.net");
                 if let Some(full_name) = full_name.clone() {
                     self.save_contact(id.clone(), full_name, first_name, to_phone);
                 }
@@ -9952,8 +10048,12 @@ impl Worker {
         // Our own words are not marked forwarded, as on the phone, unless
         // they were a forward to begin with.
         let own = source.from_me && !original.get_base_message().is_forwarded();
-        let (message, expiration) =
+        let (mut message, expiration) =
             outgoing_forward(&original, self.ephemeral_expiration(to_chat), own);
+        let names = self.forward_mention_names(original.get_base_message());
+        spell_out_body(&mut message, &names);
+        let mut source = source;
+        spell_out_content(&mut source.content, &names);
         let client = self.client.clone()?;
         let id = client.generate_message_id().into_string();
         let mentions = self.mentions_of(&recorded_mention_ids(&message));
@@ -12085,6 +12185,70 @@ fn outgoing_forward(
     }
     let expiration = apply_ephemeral_expiration(&mut message, expiration);
     (message, expiration)
+}
+
+/// Spells out the mentions in an outgoing forward's text or caption.
+fn spell_out_body(message: &mut wa::Message, names: &[(String, String)]) {
+    if names.is_empty() {
+        return;
+    }
+    let spell = |text: &mut Option<String>| {
+        if let Some(text) = text.as_mut() {
+            *text = crate::mentions::spell_out(text, names);
+        }
+    };
+    spell(&mut message.conversation);
+    if let Some(text) = message.extended_text_message.as_option_mut() {
+        spell(&mut text.text);
+    }
+    if let Some(image) = message.image_message.as_option_mut() {
+        spell(&mut image.caption);
+    }
+    for video in [
+        message.video_message.as_option_mut(),
+        message.ptv_message.as_option_mut(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        spell(&mut video.caption);
+    }
+    if let Some(document) = message.document_message.as_option_mut() {
+        spell(&mut document.caption);
+    }
+}
+
+/// Spells out the mentions in our stored copy of a forward, as sent.
+fn spell_out_content(content: &mut Content, names: &[(String, String)]) {
+    if names.is_empty() {
+        return;
+    }
+    match content {
+        Content::Text { text, .. } => *text = crate::mentions::spell_out(text, names),
+        Content::Image {
+            caption: Some(caption),
+            ..
+        }
+        | Content::Video {
+            caption: Some(caption),
+            ..
+        }
+        | Content::Document {
+            caption: Some(caption),
+            ..
+        } => *caption = crate::mentions::spell_out(caption, names),
+        _ => {}
+    }
+}
+
+fn registered_number(typed: &str, jid: &Jid, pn_jid: Option<&Jid>) -> String {
+    [Some(jid), pn_jid]
+        .into_iter()
+        .flatten()
+        .find(|jid| {
+            jid.is_pn() && !jid.user.is_empty() && jid.user.bytes().all(|b| b.is_ascii_digit())
+        })
+        .map_or_else(|| typed.to_owned(), |jid| jid.user.to_string())
 }
 
 fn apply_ephemeral_expiration(message: &mut wa::Message, expiration: Option<u32>) -> Option<u32> {
@@ -14875,7 +15039,7 @@ mod tests {
                     full_name,
                     first_name: None,
                     to_phone: true,
-                    registered: Ok(true),
+                    registered: Ok(Some("15550000001".into())),
                 })
                 .await;
             worker

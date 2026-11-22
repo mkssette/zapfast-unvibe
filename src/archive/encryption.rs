@@ -205,7 +205,9 @@ fn resolve_entry_keys(
                             let old_parent_str = parent_str.replace("zapfast-unvibe", old_name);
                             let old_parent = Path::new(&old_parent_str);
                             if let Ok(old_id) = identity_for(old_parent) {
-                                if let Ok(old_entry) = store.build("rocks.zapfast.ZapFast", &old_id, None) {
+                                if let Ok(old_entry) =
+                                    store.build("rocks.zapfast.ZapFast", &old_id, None)
+                                {
                                     if let Ok(secret) = old_entry.get_secret() {
                                         if !secret.is_empty() {
                                             let _ = entry.set_secret(&secret);

@@ -122,8 +122,8 @@ pub(crate) fn emoji_candidates(app: &App, query: &str) -> Vec<EmojiSuggestion> {
             .settings
             .recent_emoji
             .iter()
-            .filter_map(|emoji| emojis::get(emoji))
-            .chain(emojis::iter())
+            .filter_map(|emoji| crate::emoji::lookup(emoji))
+            .chain(crate::emoji::catalogue())
             .filter(|emoji| seen.insert(emoji.as_str()))
             .take(LIMIT)
             .map(emoji_suggestion)
@@ -131,7 +131,7 @@ pub(crate) fn emoji_candidates(app: &App, query: &str) -> Vec<EmojiSuggestion> {
         return recent;
     }
 
-    let mut found: Vec<_> = emojis::iter()
+    let mut found: Vec<_> = crate::emoji::catalogue()
         .enumerate()
         .filter_map(|(order, emoji)| {
             emoji_match_score(emoji, &query).map(|score| (score, order, emoji))

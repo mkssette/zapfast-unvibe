@@ -48,11 +48,13 @@ pub enum Locale {
     Turkish,
     #[serde(rename = "id")]
     Indonesian,
+    #[serde(rename = "nl")]
+    Dutch,
 }
 
 impl Locale {
     /// Every locale shown in the language picker, in a stable order.
-    pub const ALL: [Locale; 11] = [
+    pub const ALL: [Locale; 12] = [
         Self::English,
         Self::PortugueseBrazil,
         Self::German,
@@ -64,6 +66,7 @@ impl Locale {
         Self::ChineseTraditional,
         Self::Turkish,
         Self::Indonesian,
+        Self::Dutch,
     ];
 
     /// The language's own name, for the picker.
@@ -80,6 +83,7 @@ impl Locale {
             Self::ChineseTraditional => "繁體中文",
             Self::Turkish => "Türkçe",
             Self::Indonesian => "Bahasa Indonesia",
+            Self::Dutch => "Nederlands",
         }
     }
 
@@ -97,6 +101,7 @@ impl Locale {
             Self::ChineseTraditional => "zh-Hant",
             Self::Turkish => "tr",
             Self::Indonesian => "id",
+            Self::Dutch => "nl",
         }
     }
 
@@ -119,6 +124,7 @@ impl Locale {
             "ru" => Self::Russian,
             "tr" => Self::Turkish,
             "id" => Self::Indonesian,
+            "nl" => Self::Dutch,
             "zh" => match (tag.script.as_deref(), tag.region.as_deref()) {
                 // An explicit script decides on its own: a tag that asks for
                 // Simplified and names a region where Traditional is the
@@ -149,6 +155,7 @@ impl fastframe_i18n::Locale for Locale {
             Self::ChineseTraditional => Some(&zh_hant::Translator),
             Self::Turkish => Some(&tr::Translator),
             Self::Indonesian => Some(&id::Translator),
+            Self::Dutch => Some(&nl::Translator),
             Self::English => None,
         }
     }
