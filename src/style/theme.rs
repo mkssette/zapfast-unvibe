@@ -692,7 +692,7 @@ pub fn apply(ctx: &egui::Context, palette: &Palette) {
     visuals.weak_text_color = Some(palette.secondary);
     visuals.hyperlink_color = palette.link;
     visuals.selection.bg_fill = palette.accent.gamma_multiply(0.35);
-    visuals.selection.stroke = Stroke::new(FOCUS_STROKE_WIDTH, palette.accent);
+    visuals.selection.stroke = Stroke::new(FOCUS_STROKE_WIDTH, palette.outline);
     visuals.window_stroke = Stroke::new(1.0, palette.outline);
     visuals.window_corner_radius = CornerRadius::same(RADIUS + 2);
     visuals.menu_corner_radius = CornerRadius::same(RADIUS);

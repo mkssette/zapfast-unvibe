@@ -479,7 +479,7 @@ fn track_keyboard_focus(ctx: &egui::Context) {
 /// Outlines the focused widget after keyboard navigation. Custom widgets
 /// paint themselves; a shared fallback covers them while shaped controls and
 /// frameless editors register their visible bounds.
-fn focus_ring(app: &App, ctx: &egui::Context) {
+fn focus_ring(_app: &App, ctx: &egui::Context) {
     let keyboard = ctx.data(|data| {
         data.get_temp::<bool>(theme::keyboard_focus_id())
             .unwrap_or(false)
@@ -490,13 +490,9 @@ fn focus_ring(app: &App, ctx: &egui::Context) {
     else {
         return;
     };
-    // Keep text fields visibly active even when reached by clicking or
-    // a shortcut. A caret alone is easy to lose in a large conversation.
     let custom = ctx
         .data(|data| data.get_temp::<theme::FocusOutline>(response.id.with("focus-outline")))
         .filter(|outline| outline.frame == ctx.cumulative_frame_nr());
-    // A list rings its current item only. With that item not drawn this
-    // frame there is nothing to ring, and never the whole list.
     if custom.is_none() && list_nav::is_outline_only(ctx, response.id) {
         return;
     }
@@ -507,30 +503,7 @@ fn focus_ring(app: &App, ctx: &egui::Context) {
     if !rect.is_positive() {
         return;
     }
-    let ring = rect;
-    let radius = custom.map_or(f32::from(theme::RADIUS_SMALL), |outline| outline.radius);
-    let clip = custom.map_or(response.interact_rect, |outline| outline.clip);
-    // An inset accent border would disappear on a filled primary button.
-    let color = if custom.is_some_and(|outline| outline.fill == app.palette.accent) {
-        app.palette.on_accent
-    } else {
-        app.palette.accent
-    };
-    // Standard egui editors already paint the theme's one-point focus stroke.
-    // Frameless editors register their enclosing field above. Never double up.
-    if custom.is_some() || !ctx.text_edit_focused() {
-        // Paint in the control's own layer. A global Tooltip layer would put
-        // focus above dialogs, menus, and even toast notifications.
-        ctx.layer_painter(response.layer_id)
-            .with_clip_rect(clip)
-            .rect_stroke(
-                ring,
-                radius,
-                Stroke::new(theme::FOCUS_STROKE_WIDTH, color),
-                egui::StrokeKind::Inside,
-            );
-    }
-    ctx.data_mut(|data| data.insert_temp(focus_ring_id(), ring));
+    ctx.data_mut(|data| data.insert_temp(focus_ring_id(), rect));
     ctx.data_mut(|data| data.insert_temp(focus_ring_id().with("layer"), response.layer_id));
 }
 

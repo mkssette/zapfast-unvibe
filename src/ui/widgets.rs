@@ -1142,15 +1142,7 @@ pub fn search_field(
         (false, true) => palette.surface_hover,
         (false, false) => palette.surface,
     };
-    let keyboard_focus = ui
-        .ctx()
-        .data(|data| data.get_temp::<bool>(theme::keyboard_focus_id()))
-        .unwrap_or(false);
-    let stroke = if has_focus && !keyboard_focus {
-        Stroke::new(1.0, palette.accent)
-    } else {
-        Stroke::new(1.0, palette.outline)
-    };
+    let stroke = Stroke::new(1.0, palette.outline);
     ui.painter()
         .rect(rect, height * 0.5, fill, stroke, egui::StrokeKind::Inside);
     let icon_rect =
