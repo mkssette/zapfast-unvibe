@@ -279,9 +279,10 @@ pub fn finish(ctx: &egui::Context) {
         ctx.memory_mut(|memory| memory.request_focus(first));
         opened.entered = true;
     } else if drawn.iter().all(|widget| !widget.visible) {
-        if ctx.current_pass_index() == 0 {
-            ctx.request_discard("an overlay the keys opened takes focus in the pass that shows it");
-        }
+        super::request_discard(
+            ctx,
+            "an overlay the keys opened takes focus in the pass that shows it",
+        );
     } else {
         // Shown, with nothing to focus: it is not tried again every frame.
         opened.entered = true;

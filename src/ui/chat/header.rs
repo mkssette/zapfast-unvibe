@@ -22,7 +22,7 @@ impl PinBanner {
     }
 }
 
-pub(crate) const PIN_ROW_HEIGHT: f32 = 44.0;
+pub(crate) const PIN_ROW_HEIGHT: f32 = 49.0;
 /// Gap between the banner edge and the pin count bar, and the icon's own box.
 pub(crate) const PIN_ROW_INSET: f32 = 12.0;
 pub(crate) const PIN_ICON: f32 = 16.0;
@@ -89,6 +89,11 @@ pub(crate) fn pin_banner(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
             palette.panel
         },
     );
+    ui.painter().hline(
+        bar.x_range(),
+        bar.bottom() - 0.5,
+        Stroke::new(1.0, palette.outline),
+    );
     // Newest pin at the bottom, so the bar fills upward as pins are added.
     let segments = pin_bar_segments(bar.top() + 8.0, bar.height() - 16.0, rows.len());
     let left = bar.left() + PIN_ROW_INSET;
@@ -152,21 +157,38 @@ pub(crate) fn pin_cursor_id(chat: &str) -> egui::Id {
 pub(crate) fn empty(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let rect = ui.max_rect();
-    let center = rect.center() - vec2(0.0, 30.0);
-    theme::logo(
-        ui,
-        center - vec2(0.0, 60.0),
-        72.0,
-        palette.surface,
-        palette.dim,
-    );
-    ui.painter().text(
-        center,
-        Align2::CENTER_CENTER,
-        "ZapFast",
-        theme::bold(24.0),
-        palette.text,
-    );
+    let center = rect.center() - vec2(0.0, 28.0);
+    if palette.vibrant() {
+        theme::logo(
+            ui,
+            center - vec2(0.0, 60.0),
+            72.0,
+            palette.surface,
+            palette.dim,
+        );
+        ui.painter().text(
+            center,
+            Align2::CENTER_CENTER,
+            "ZapFast",
+            theme::bold(24.0),
+            palette.text,
+        );
+    } else {
+        theme::logo(
+            ui,
+            center - vec2(0.0, 56.0),
+            64.0,
+            palette.surface,
+            palette.dim,
+        );
+        ui.painter().text(
+            center,
+            Align2::CENTER_CENTER,
+            "ZapFast",
+            theme::semibold(22.0),
+            palette.text,
+        );
+    }
     ui.painter().text(
         center + vec2(0.0, 30.0),
         Align2::CENTER_CENTER,
@@ -178,6 +200,15 @@ pub(crate) fn empty(app: &mut App, ui: &mut egui::Ui) {
         theme::regular(14.0),
         palette.secondary,
     );
+    if !palette.vibrant() {
+        ui.painter().text(
+            pos2(rect.center().x, rect.bottom() - 36.0),
+            Align2::CENTER_CENTER,
+            crate::i18n::gettext(app.locale, "End-to-end encrypted"),
+            theme::regular(12.0),
+            palette.dim,
+        );
+    }
 }
 
 pub(crate) const HEADER_EASE: f32 = 0.35;
@@ -276,7 +307,14 @@ pub(crate) fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                 } else {
                     palette.panel
                 })
-                .inner_margin(Margin::symmetric(14, 8)),
+                .inner_margin(Margin::symmetric(
+                    14,
+                    if palette.vibrant() || theme::macos_chrome(ui.ctx()) {
+                        8
+                    } else {
+                        10
+                    },
+                )),
         )
         .show(ui, |ui| {
             // The chat list, expanded or collapsed, clears the traffic lights.
@@ -644,60 +682,64 @@ pub(crate) fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                             }
                         });
                     if call_buttons > 0.0 {
-                        let (call_tooltip, call_icon, call_fill, call) = if call_here {
-                            (
-                                crate::i18n::gettext(app.locale, "Hang up").into_owned(),
-                                Icon::PhoneOff,
-                                palette.danger,
-                                Action::HangupCall,
-                            )
+                        if !call_here && !palette.vibrant() {
+                            segmented_call_buttons(app, ui, &palette, &chat.id);
                         } else {
-                            (
-                                crate::i18n::gettext(app.locale, "Voice call").into_owned(),
-                                Icon::Phone,
-                                palette.secondary,
-                                Action::StartCall(chat.id.clone()),
-                            )
-                        };
-                        if palette.vibrant() {
-                            ui.add_space(BUTTON_GAP);
-                        }
-                        let call_glass = ui.painter().add(egui::Shape::Noop);
-                        let call_button = theme::icon_button(
-                            ui,
-                            call_icon,
-                            18.0,
-                            call_fill,
-                            palette.text,
-                            &call_tooltip,
-                        );
-                        if palette.vibrant() {
-                            ui.painter()
-                                .set(call_glass, glass_button(&palette, call_button.rect));
-                        }
-                        if call_button.clicked() {
-                            app.actions.push(call);
-                        }
-                        if !call_here {
-                            let tip = crate::i18n::gettext(app.locale, "Video call");
+                            let (call_tooltip, call_icon, call_fill, call) = if call_here {
+                                (
+                                    crate::i18n::gettext(app.locale, "Hang up").into_owned(),
+                                    Icon::PhoneOff,
+                                    palette.danger,
+                                    Action::HangupCall,
+                                )
+                            } else {
+                                (
+                                    crate::i18n::gettext(app.locale, "Voice call").into_owned(),
+                                    Icon::Phone,
+                                    palette.secondary,
+                                    Action::StartCall(chat.id.clone()),
+                                )
+                            };
                             if palette.vibrant() {
                                 ui.add_space(BUTTON_GAP);
                             }
-                            let video_glass = ui.painter().add(egui::Shape::Noop);
-                            let video = theme::icon_button(
+                            let call_glass = ui.painter().add(egui::Shape::Noop);
+                            let call_button = theme::icon_button(
                                 ui,
-                                Icon::Video,
+                                call_icon,
                                 18.0,
-                                palette.secondary,
+                                call_fill,
                                 palette.text,
-                                &tip,
+                                &call_tooltip,
                             );
                             if palette.vibrant() {
                                 ui.painter()
-                                    .set(video_glass, glass_button(&palette, video.rect));
+                                    .set(call_glass, glass_button(&palette, call_button.rect));
                             }
-                            if video.clicked() {
-                                app.actions.push(Action::StartVideoCall(chat.id.clone()));
+                            if call_button.clicked() {
+                                app.actions.push(call);
+                            }
+                            if !call_here {
+                                let tip = crate::i18n::gettext(app.locale, "Video call");
+                                if palette.vibrant() {
+                                    ui.add_space(BUTTON_GAP);
+                                }
+                                let video_glass = ui.painter().add(egui::Shape::Noop);
+                                let video = theme::icon_button(
+                                    ui,
+                                    Icon::Video,
+                                    18.0,
+                                    palette.secondary,
+                                    palette.text,
+                                    &tip,
+                                );
+                                if palette.vibrant() {
+                                    ui.painter()
+                                        .set(video_glass, glass_button(&palette, video.rect));
+                                }
+                                if video.clicked() {
+                                    app.actions.push(Action::StartVideoCall(chat.id.clone()));
+                                }
                             }
                         }
                     }
@@ -748,6 +790,118 @@ pub(crate) fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
     ui.ctx()
         .data_mut(|data| data.insert_temp(header_rect_id(), rect));
     rect
+}
+
+fn segmented_call_buttons(app: &mut App, ui: &mut egui::Ui, palette: &Palette, chat_id: &str) {
+    let (bg, hover, border, sep) = (
+        palette.surface,
+        palette.surface_hover,
+        palette.outline,
+        palette.outline,
+    );
+    let (pill, _) = ui.allocate_exact_size(vec2(88.0, 36.0), Sense::hover());
+    let video_rect = Rect::from_min_max(pill.min, pos2(pill.center().x, pill.bottom()));
+    let voice_rect = Rect::from_min_max(pos2(pill.center().x, pill.top()), pill.max);
+    let video_tip = crate::i18n::gettext(app.locale, "Video call").into_owned();
+    let voice_tip = crate::i18n::gettext(app.locale, "Voice call").into_owned();
+    let video_res = ui
+        .interact(video_rect, ui.id().with("header-video-call"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let voice_res = ui
+        .interact(voice_rect, ui.id().with("header-voice-call"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    theme::reveal_focus(&video_res);
+    theme::reveal_focus(&voice_res);
+    video_res.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &video_tip)
+    });
+    voice_res.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &voice_tip)
+    });
+    if ui.is_rect_visible(pill) {
+        ui.painter().rect_filled(
+            video_rect,
+            CornerRadius {
+                nw: 6,
+                sw: 6,
+                ne: 0,
+                se: 0,
+            },
+            if video_res.hovered() || video_res.has_focus() {
+                hover
+            } else {
+                bg
+            },
+        );
+        ui.painter().rect_filled(
+            voice_rect,
+            CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: 6,
+                se: 6,
+            },
+            if voice_res.hovered() || voice_res.has_focus() {
+                hover
+            } else {
+                bg
+            },
+        );
+        ui.painter().rect_stroke(
+            pill,
+            CornerRadius::same(6),
+            Stroke::new(1.0, border),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().vline(
+            pill.center().x,
+            (pill.top() + 6.0)..=(pill.bottom() - 6.0),
+            Stroke::new(1.0, sep),
+        );
+        let v_scale = if video_res.is_pointer_button_down_on() {
+            0.92
+        } else {
+            1.0
+        };
+        let a_scale = if voice_res.is_pointer_button_down_on() {
+            0.92
+        } else {
+            1.0
+        };
+        theme::paint_icon(
+            ui,
+            Icon::Video,
+            video_rect,
+            18.0 * v_scale,
+            if video_res.hovered() || video_res.has_focus() {
+                palette.text
+            } else {
+                palette.secondary
+            },
+        );
+        theme::paint_icon(
+            ui,
+            Icon::Phone,
+            voice_rect,
+            18.0 * a_scale,
+            if voice_res.hovered() || voice_res.has_focus() {
+                palette.text
+            } else {
+                palette.secondary
+            },
+        );
+    }
+    #[cfg(any(test, feature = "demo"))]
+    {
+        crate::ui::focus::name_button(ui.ctx(), &video_tip, video_res.id);
+        crate::ui::focus::name_button(ui.ctx(), &voice_tip, voice_res.id);
+    }
+    if video_res.on_hover_text(video_tip).clicked() {
+        app.actions.push(Action::StartVideoCall(chat_id.to_owned()));
+    }
+    if voice_res.on_hover_text(voice_tip).clicked() {
+        app.actions.push(Action::StartCall(chat_id.to_owned()));
+    }
 }
 
 /// Where the chat header was last laid out, for the panes beside it.

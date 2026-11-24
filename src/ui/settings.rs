@@ -1429,7 +1429,7 @@ pub fn wallpaper_show(app: &mut App, ui: &mut egui::Ui) {
                                     ui.add_space(12.0);
                                     image_buttons(app, ui, palette_width);
                                     ui.add_space(18.0);
-                                    let button_width = 80.0;
+                                    let button_width = if palette.vibrant() { 80.0 } else { 51.0 };
                                     let item_spacing = ui.spacing().item_spacing.x;
                                     let columns = ((palette_width + item_spacing)
                                         / (button_width + item_spacing))
@@ -1545,18 +1545,20 @@ fn wallpaper_color_button(
     color: WallpaperColor,
     selected: WallpaperColor,
 ) -> bool {
+    let vibrant = palette.vibrant();
+    let size = if vibrant { 80.0 } else { 51.0 };
     let fill = color.color32(palette);
     let label = wallpaper_label(locale, color);
     // Theme follows the palette, so its swatch names itself.
     let text = if color == WallpaperColor::Theme {
         egui::RichText::new(label.as_str())
-            .font(theme::medium(13.0))
+            .font(theme::medium(if vibrant { 13.0 } else { 11.5 }))
             .color(palette.text)
     } else {
         egui::RichText::new(" ")
     };
     let button = egui::Button::new(text)
-        .min_size(Vec2::splat(80.0))
+        .min_size(Vec2::splat(size))
         .fill(fill)
         .stroke(if color == selected {
             Stroke::new(4.0, fill.gamma_multiply(0.5))

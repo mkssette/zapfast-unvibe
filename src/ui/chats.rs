@@ -29,7 +29,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, anim_t: f32) {
         .show_separator_line(false)
         .frame(
             Frame::new()
-                .fill(palette.sidebar())
+                .fill(if palette.vibrant() {
+                    palette.sidebar()
+                } else {
+                    palette.rail()
+                })
                 .inner_margin(Margin::ZERO),
         );
     let panel = if is_animating {
@@ -44,6 +48,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, anim_t: f32) {
     let response = panel.show(ui, |ui| {
         let panel_rect = ui.max_rect();
         ui.set_clip_rect(panel_rect);
+        if !palette.vibrant() {
+            ui.painter().rect_filled(
+                panel_rect,
+                egui::CornerRadius {
+                    nw: theme::RADIUS + 2,
+                    ne: 0,
+                    sw: 0,
+                    se: 0,
+                },
+                palette.sidebar(),
+            );
+        }
         if is_animating {
             ui.ctx().request_repaint();
             let pending_reveal = app.scroll_chat_into_view.take();
@@ -184,11 +200,12 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
     // tall as its own, so the two titles share a centre line. The right
     // margin matches the left, so the search field and the chips end where
     // the rows' timestamps do.
+    let top_margin = if palette.vibrant() { 8 } else { 10 };
     Frame::new()
         .inner_margin(Margin {
             left: 14,
             right: 14,
-            top: 8,
+            top: top_margin,
             bottom: 8,
         })
         .show(ui, |ui| {
@@ -200,10 +217,10 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
             super::caption_drag(
                 ui,
                 Rect::from_min_size(
-                    top.min - vec2(14.0, 8.0),
+                    top.min - vec2(14.0, f32::from(top_margin)),
                     vec2(
                         top.width() + 28.0,
-                        8.0 + room.top + super::conversation::HEADER_ROW,
+                        f32::from(top_margin) + room.top + super::conversation::HEADER_ROW,
                     ),
                 ),
             );
@@ -236,7 +253,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
                         header_title(
                             ui,
                             crate::i18n::gettext(app.locale, "Starred").as_ref(),
-                            theme::bold(20.0),
+                            theme::semibold(20.0),
                             palette.text,
                             buttons_width,
                         );
@@ -267,7 +284,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
                                     "Archived"
                                 },
                             ),
-                            theme::bold(20.0),
+                            theme::semibold(20.0),
                             palette.text,
                             buttons_width,
                         );
@@ -277,7 +294,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
                         header_title(
                             ui,
                             &crate::i18n::gettext(app.locale, tab_title(&app.page)),
-                            theme::bold(20.0),
+                            theme::semibold(20.0),
                             palette.text,
                             buttons_width,
                         );
@@ -325,7 +342,7 @@ fn new_call_header(app: &mut App, ui: &mut egui::Ui, title: f32, buttons: f32) {
     header_title(
         ui,
         crate::i18n::gettext(app.locale, "New call").as_ref(),
-        theme::bold(title),
+        theme::semibold(title),
         palette.text,
         buttons,
     );
@@ -1668,27 +1685,27 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         } else {
             palette.dim
         };
+        let stamp_font = if unread && !muted {
+            theme::semibold(12.0)
+        } else {
+            theme::regular(12.0)
+        };
         let stamp_galley = ui
             .painter()
-            .layout_no_wrap(stamp, theme::regular(11.5), stamp_color);
-        let name_top = rect.top() + 14.0;
+            .layout_no_wrap(stamp, stamp_font, stamp_color);
+        let name_top = rect.top() + 15.0;
         ui.painter().galley(
             pos2(right - stamp_galley.size().x, name_top + 1.0),
             stamp_galley.clone(),
             stamp_color,
         );
         let name_width = (right - stamp_galley.size().x - 8.0 - left).max(0.0);
-        let name_font = if unread {
-            theme::semibold(14.5)
-        } else {
-            theme::medium(14.5)
-        };
-        let name = widgets::line(ui, &title, name_font, palette.text, name_width, 1);
+        let name = widgets::line(ui, &title, theme::semibold(14.0), palette.text, name_width, 1);
         name.paint(ui, pos2(left, name_top), palette.text);
 
         // Leave room for badges beside the latest-message preview.
         let mut badge_right = right;
-        let line_y = rect.top() + 38.0;
+        let line_y = rect.top() + 40.0;
         if unread {
             let width = widgets::unread_indicator(
                 ui,

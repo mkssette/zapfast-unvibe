@@ -249,7 +249,7 @@ fn tile(
             .fit_to_exact_size(rect.size() - Vec2::splat(8.0))
             .corner_radius(4.0)
             .paint_at(ui, rect.shrink(4.0));
-    } else {
+    } else if !crate::platform::file_icon::paint(ui, &label, rect, 28.0) {
         theme::paint_icon(ui, Icon::FileText, rect, 24.0, palette.secondary);
     }
     if selected {
@@ -356,7 +356,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             );
             body.add_space((rect.height() / 2.0 - 65.0).max(0.0));
             let (icon, _) = body.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
-            theme::paint_icon(&body, Icon::FileText, icon, 54.0, palette.secondary);
+            if !crate::platform::file_icon::paint(&body, &name, icon, 48.0) {
+                theme::paint_icon(&body, Icon::FileText, icon, 54.0, palette.secondary);
+            }
             body.add(egui::Label::new(egui::RichText::new(name).color(palette.text)).wrap());
             let size = match &item.item {
                 Pending::Picture { .. } => None,

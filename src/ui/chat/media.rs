@@ -1042,6 +1042,10 @@ pub(crate) fn attachment(
 
             let disc = |ui: &mut egui::Ui| {
                 let (disc, _) = ui.allocate_exact_size(Vec2::splat(36.0), Sense::hover());
+                if icon == Icon::FileText && crate::platform::file_icon::paint(ui, title, disc, 32.0)
+                {
+                    return;
+                }
                 ui.painter().circle_filled(
                     disc.center(),
                     18.0,

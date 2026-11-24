@@ -89,7 +89,7 @@ impl TabStop for Response {
             // `reveal_focus` has queued the scroll while this control's
             // scroll area is open. Re-layout so its ring is visible now.
             if self.gained_focus() && self.interact_rect != self.rect {
-                self.ctx.request_discard("reveal primary Tab control");
+                super::request_discard(&self.ctx, "reveal primary Tab control");
             }
             self.ctx.data_mut(|data| {
                 let order = data.get_temp_mut_or_default::<Order>(order_id());

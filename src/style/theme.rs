@@ -624,8 +624,8 @@ fn hsl(hue: f32, saturation: f32, lightness: f32) -> Color32 {
 pub const RADIUS: u8 = 8;
 pub const RADIUS_SMALL: u8 = 4;
 pub const FOCUS_STROKE_WIDTH: f32 = 1.0;
-pub const ROW_HEIGHT: f32 = 68.0;
-pub const TOP_BAR_HEIGHT: f32 = 60.0;
+pub const ROW_HEIGHT: f32 = 72.0;
+pub const TOP_BAR_HEIGHT: f32 = 64.0;
 
 pub fn regular(size: f32) -> egui::FontId {
     fastframe_fonts::Weight::Regular.font_id(size)
@@ -730,10 +730,10 @@ pub fn apply(ctx: &egui::Context, palette: &Palette) {
     use egui::FontFamily::{Monospace, Proportional};
     use egui::{FontId, TextStyle};
     style.text_styles = [
-        (TextStyle::Small, FontId::new(11.5, Proportional)),
+        (TextStyle::Small, FontId::new(12.0, Proportional)),
         (TextStyle::Body, FontId::new(14.0, Proportional)),
         (TextStyle::Button, FontId::new(14.0, Proportional)),
-        (TextStyle::Heading, FontId::new(22.0, Proportional)),
+        (TextStyle::Heading, FontId::new(20.0, Proportional)),
         (TextStyle::Monospace, FontId::new(13.0, Monospace)),
     ]
     .into();
@@ -1015,16 +1015,15 @@ pub fn icon_button(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
     });
     if ui.is_rect_visible(rect) {
-        let tint = if response.hovered() || response.has_focus() {
-            hover
-        } else {
-            color
-        };
-        let scale = if response.is_pointer_button_down_on() {
-            0.92
-        } else {
-            1.0
-        };
+        let hovered = response.hovered() || response.has_focus();
+        let pressed = response.is_pointer_button_down_on();
+        if hovered || pressed {
+            let alpha = if pressed { 0.10 } else { 0.07 };
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(RADIUS_SMALL + 2), hover.gamma_multiply(alpha));
+        }
+        let tint = if hovered { hover } else { color };
+        let scale = if pressed { 0.92 } else { 1.0 };
         paint_icon(ui, icon, rect, size * scale, tint);
     }
     #[cfg(any(test, feature = "demo"))]
@@ -1143,11 +1142,12 @@ pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: b
     let size = galley.size() + padding * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     reveal_focus(&response);
+    let radius = rect.height() / 2.0;
     focus_outline_on_fill(
         ui,
         response.id,
         rect,
-        rect.height() / 2.0,
+        radius,
         if primary {
             palette.accent
         } else {
@@ -1161,7 +1161,6 @@ pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: b
     let enabled = ui.is_enabled();
     if ui.is_rect_visible(rect) {
         let hovered = enabled && response.hovered();
-        let radius = rect.height() / 2.0;
         if primary {
             let fill = if hovered {
                 palette.accent_hover
@@ -1208,7 +1207,8 @@ pub fn soft_button(
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, label)
     });
-    focus_outline(ui, response.id, rect, rect.height() / 2.0);
+    let radius = rect.height() / 2.0;
+    focus_outline(ui, response.id, rect, radius);
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         // Active as a selected filter chip is: a tint of the accent.
@@ -1219,7 +1219,7 @@ pub fn soft_button(
         } else {
             palette.surface
         };
-        ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
+        ui.painter().rect_filled(rect, radius, fill);
         let mut x = rect.left() + padding.x;
         if let Some(icon) = icon {
             let icon_rect = egui::Rect::from_center_size(

@@ -1370,11 +1370,13 @@ pub(crate) fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32
         let max_offset = (output.content_size.y - output.inner_rect.height()).max(0.0);
         state.offset.y = (state.offset.y + grew_above).clamp(0.0, max_offset);
         state.store(ui.ctx(), output.id);
-        ui.ctx()
-            .request_discard("transcript rows above the viewport changed height");
+        crate::ui::request_discard(
+            ui.ctx(),
+            "transcript rows above the viewport changed height",
+        );
     }
     if first_show && pinned && !redo && (output.state.offset.y - offset).abs() >= 0.5 {
-        ui.ctx().request_discard("scrolled to the end");
+        crate::ui::request_discard(ui.ctx(), "scrolled to the end");
     }
     if reader_scrolled {
         key_scroll = None;
@@ -1448,8 +1450,10 @@ pub(crate) fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32
         && let Some(id) = cursor_id
     {
         app.scroll_anchor = Some(id);
-        ui.ctx()
-            .request_discard("lay out the current message far from the view");
+        crate::ui::request_discard(
+            ui.ctx(),
+            "lay out the current message far from the view",
+        );
     }
     let fits = output.content_size.y <= output.inner_rect.height() + 1.0;
     let near_top = output.state.offset.y < 80.0;

@@ -16,14 +16,17 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         return;
     };
     let palette = app.palette;
+    let vibrant = palette.vibrant();
     let frame = Frame::new()
         .fill(palette.overlay)
         .stroke(Stroke::new(1.0, palette.outline))
         .corner_radius(CornerRadius::same(theme::RADIUS + 4))
         .inner_margin(Margin::same(if matches!(dialog, Dialog::Forward { .. }) {
             12
-        } else {
+        } else if vibrant || matches!(dialog, Dialog::Shortcuts) {
             22
+        } else {
+            24
         }))
         .shadow(palette.modal_shadow());
     let response = egui::Modal::new(modal_id())

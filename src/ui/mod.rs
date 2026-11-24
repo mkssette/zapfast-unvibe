@@ -427,6 +427,36 @@ pub fn focus_ring_id() -> egui::Id {
     egui::Id::new("focus-ring")
 }
 
+/// Requests a same-frame re-layout on pass 0, capped so it cannot fire three
+/// consecutive frames in a row and trigger egui's perf warning.
+pub(crate) fn request_discard(ctx: &egui::Context, reason: &'static str) {
+    if ctx.current_pass_index() != 0 {
+        return;
+    }
+    let frame = ctx.cumulative_frame_nr();
+    let id = egui::Id::new("ui-discard-streak");
+    let allow = ctx.data_mut(|data| {
+        let recent = data
+            .get_temp::<[u64; 2]>(id)
+            .unwrap_or([u64::MAX, u64::MAX]);
+        let consecutive =
+            recent[0].checked_add(1) == Some(recent[1]) && recent[1].checked_add(1) == Some(frame);
+        if consecutive {
+            false
+        } else if recent[1] != frame {
+            data.insert_temp(id, [recent[1], frame]);
+            true
+        } else {
+            true
+        }
+    });
+    if allow {
+        ctx.request_discard(reason);
+    } else {
+        ctx.request_repaint();
+    }
+}
+
 /// Tab shows where focus is; a pointer press hides it again. Widgets scroll
 /// themselves into view through `theme::reveal_focus`. In a list that rings
 /// its current item (`list_nav::outline_only`), the keys that move the item

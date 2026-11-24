@@ -1782,7 +1782,9 @@ fn item_row(
             Vec2::splat(40.0),
         );
         ui.painter().rect_filled(tile, 8.0, palette.surface);
-        theme::paint_icon(ui, icon, tile, 20.0, palette.secondary);
+        if icon != Icon::FileText || !crate::platform::file_icon::paint(ui, title, tile, 26.0) {
+            theme::paint_icon(ui, icon, tile, 20.0, palette.secondary);
+        }
         let left = tile.right() + 12.0;
         let width = rect.right() - MARGIN - left;
         let name = widgets::line(ui, title, theme::medium(13.5), palette.text, width, 1);

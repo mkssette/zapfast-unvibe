@@ -233,7 +233,7 @@ impl Composer {
             previous
         });
         if previous.is_some_and(|previous| (previous - height).abs() > 0.5) && !is_animating {
-            ui.ctx().request_discard("composer height changed");
+            crate::ui::request_discard(ui.ctx(), "composer height changed");
         }
         ui.ctx()
             .data_mut(|data| data.insert_temp(super::composer_rect_id(), shown.response.rect));
@@ -857,7 +857,7 @@ impl ComposerInputRow {
                                 data.insert_temp(composer_text_id(), painted);
                             });
                             if (measured - text_height).abs() > 0.5 {
-                                ui.ctx().request_discard("composer height changed");
+                                crate::ui::request_discard(ui.ctx(), "composer height changed");
                             }
 
                             let response =

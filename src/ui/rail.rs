@@ -16,19 +16,19 @@ use super::focus::{Stop, TabStop};
 use super::widgets;
 
 /// Width of the rail, on every platform.
-pub const WIDTH: f32 = 52.0;
+pub const WIDTH: f32 = 48.0;
 /// Height of one destination at the top: the list header's title and
 /// search field sit level with Chats and Calls.
-const CELL: f32 = 48.0;
+const CELL: f32 = 44.0;
 /// The lit square behind a destination's icon.
-const PLATE: f32 = 36.0;
+const PLATE: f32 = 38.0;
 /// A destination's icon.
-const ICON: f32 = 20.0;
+const ICON: f32 = 18.0;
 /// Our avatar at the foot of the rail.
-const AVATAR: f32 = 32.0;
+const AVATAR: f32 = 28.0;
 /// Space above the first destination, as the list header's own margin, and
 /// between the bottom group's plates, the avatar and the window's edge.
-const GAP: f32 = 8.0;
+const GAP: f32 = 6.0;
 /// The least height the chats' avatars take. If the rail cannot fit this
 /// and both groups, the whole rail scrolls below the window buttons.
 const MIN_AVATARS: f32 = 64.0;
@@ -236,6 +236,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, hidden: bool) {
                 }
                 let rest = (ui.available_height() - foot).max(0.0);
                 ui.add_space(rest);
+                if !bottom.is_empty() && !palette.vibrant() {
+                    let line = Rect::from_center_size(
+                        ui.cursor().min + vec2(width / 2.0, GAP * 0.5),
+                        vec2(DIVIDER, 1.0),
+                    );
+                    ui.painter()
+                        .rect_filled(line, 0.0, palette.text.gamma_multiply(0.08));
+                }
                 for destination in bottom {
                     ui.add_space(GAP);
                     destination_button(app, ui, &palette, destination, PLATE);
@@ -360,10 +368,35 @@ fn destination_button(
     });
     if ui.is_rect_visible(plate) {
         let hovered = response.hovered() || response.has_focus();
-        if lit {
-            widgets::highlight_card(ui, palette, plate, palette.surface_active);
-        } else if hovered {
-            widgets::highlight_card(ui, palette, plate, palette.surface_hover);
+        if palette.vibrant() {
+            if lit {
+                widgets::highlight_card(ui, palette, plate, palette.surface_active);
+            } else if hovered {
+                widgets::highlight_card(ui, palette, plate, palette.surface_hover);
+            }
+        } else {
+            let tint = if lit {
+                palette.surface_active
+            } else if hovered {
+                palette.surface_hover
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            if tint != egui::Color32::TRANSPARENT {
+                ui.painter().rect_filled(
+                    plate,
+                    egui::CornerRadius::same(theme::RADIUS + 2),
+                    tint,
+                );
+            }
+            if lit {
+                let pill = Rect::from_min_size(
+                    egui::pos2(plate.left() + 1.0, plate.center().y - 8.0),
+                    vec2(3.0, 16.0),
+                );
+                ui.painter()
+                    .rect_filled(pill, egui::CornerRadius::same(2), palette.accent);
+            }
         }
         let tint = if lit || hovered {
             palette.text

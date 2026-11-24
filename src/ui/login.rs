@@ -28,6 +28,7 @@ pub(super) fn card(
     body: impl FnOnce(&mut App, &mut egui::Ui),
 ) {
     let palette = app.palette;
+    let vibrant = palette.vibrant();
     egui::CentralPanel::default()
         .frame(Frame::new().fill(palette.window))
         .show(ui, |ui| {
@@ -50,11 +51,12 @@ pub(super) fn card(
                     .max_rect(card)
                     .layout(Layout::top_down(Align::Center)),
             );
+            let margin = if vibrant { 32 } else { 28 };
             let shown = Frame::new()
                 .fill(palette.panel)
                 .stroke(Stroke::new(1.0, palette.outline))
                 .corner_radius(CornerRadius::same(theme::RADIUS + 8))
-                .inner_margin(Margin::same(32))
+                .inner_margin(Margin::same(margin))
                 .shadow(egui::epaint::Shadow {
                     offset: [0, 16],
                     blur: 48,
@@ -62,12 +64,21 @@ pub(super) fn card(
                     color: palette.shadow,
                 })
                 .show(&mut card_ui, |ui| {
-                    ui.set_width((card_width - 64.0).max(0.0));
+                    ui.set_width((card_width - f32::from(margin) * 2.0).max(0.0));
                     ui.spacing_mut().item_spacing.y = 8.0;
                     let (logo, _) = ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
                     theme::mark(ui, logo.center(), 64.0);
                     ui.add_space(4.0);
-                    theme::text(ui, "ZapFast", theme::bold(28.0), palette.text);
+                    theme::text(
+                        ui,
+                        "ZapFast",
+                        if vibrant {
+                            theme::bold(28.0)
+                        } else {
+                            theme::semibold(22.0)
+                        },
+                        palette.text,
+                    );
                     theme::text(ui, tagline, theme::regular(14.5), palette.secondary);
                     ui.add_space(16.0);
                     body(app, ui);

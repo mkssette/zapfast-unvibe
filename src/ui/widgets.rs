@@ -510,17 +510,17 @@ pub fn menu_width(ui: &Ui, labels: &[&str], icons: bool) -> f32 {
         .iter()
         .map(|label| {
             ui.painter()
-                .layout_no_wrap(label.to_string(), theme::regular(13.5), Color32::WHITE)
+                .layout_no_wrap(label.to_string(), theme::regular(14.0), Color32::WHITE)
                 .size()
                 .x
         })
         .fold(0.0, f32::max);
     // Text padding, then `menu_frame`'s margin and its 1-point stroke on each
     // side: without the stroke the widest label lost its last letters.
-    widest + if icons { 26.0 } else { 0.0 } + 20.0 + MENU_FRAME_EXTRA
+    widest + if icons { 28.0 } else { 0.0 } + 20.0 + MENU_FRAME_EXTRA
 }
 
-/// What `menu_frame` adds to a menu's width: its 6-point margin and its
+/// What `menu_frame` adds to a menu's width: its 4-point margin and its
 /// 1-point stroke, on each side.
 const MENU_FRAME_EXTRA: f32 = 2.0 * (6.0 + 1.0);
 
@@ -551,7 +551,7 @@ pub fn submenu<R>(
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> Option<egui::InnerResponse<R>> {
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(vec2(width, 28.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click());
     theme::reveal_focus(&response);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
@@ -576,10 +576,10 @@ pub fn submenu<R>(
         Icon::ChevronRight
             .image(palette.secondary, 14.0)
             .paint_at(ui, chevron);
-        let x = rect.left() + 36.0;
+        let x = rect.left() + 38.0;
         let mut job = egui::text::LayoutJob::simple_singleline(
             label.to_string(),
-            theme::regular(13.5),
+            theme::regular(14.0),
             palette.text,
         );
         job.wrap = egui::text::TextWrapping {
@@ -659,7 +659,7 @@ pub fn menu_item_focusable(
     // A disabled row still takes the click, so it does not reach a widget
     // under the menu; `Sense::CLICK` is not focusable, so Tab skips it.
     let (rect, response) = ui.allocate_exact_size(
-        vec2(width, 28.0),
+        vec2(width, 34.0),
         if focusable {
             Sense::click()
         } else {
@@ -696,11 +696,11 @@ pub fn menu_item_focusable(
                 16.0,
             )
             .paint_at(ui, icon_rect);
-            x += 26.0;
+            x += 28.0;
         }
         let mut job = egui::text::LayoutJob::simple_singleline(
             label.to_string(),
-            theme::regular(13.5),
+            theme::regular(14.0),
             color,
         );
         job.wrap = egui::text::TextWrapping {
@@ -1132,19 +1132,20 @@ pub fn search_field(
     hint: &str,
     width: f32,
 ) -> egui::Response {
-    let height = 34.0;
+    let vibrant = palette.vibrant();
+    let height = if vibrant { 34.0 } else { 32.0 };
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let has_focus = ui.memory(|memory| memory.has_focus(id));
-    // Over a vibrant window's material, a tint that lets it show through.
-    let fill = match (palette.vibrant(), has_focus) {
+    let fill = match (vibrant, has_focus) {
         (true, false) => palette.tint(theme::TINT_FIELD),
         (true, true) => palette.tint(theme::TINT_FIELD + theme::TINT_HOVER),
         (false, true) => palette.surface_hover,
         (false, false) => palette.surface,
     };
+    let radius = height * 0.5;
     let stroke = Stroke::new(1.0, palette.outline);
     ui.painter()
-        .rect(rect, height * 0.5, fill, stroke, egui::StrokeKind::Inside);
+        .rect(rect, radius, fill, stroke, egui::StrokeKind::Inside);
     let icon_rect =
         Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(16.0));
     Icon::Search
@@ -1210,7 +1211,7 @@ pub fn search_field(
         );
     });
     let response = output.response.response;
-    theme::focus_outline(ui, response.id, rect, height / 2.0);
+    theme::focus_outline(ui, response.id, rect, radius);
     ui.ctx()
         .accesskit_node_builder(response.id, |node| node.set_label(hint));
     if !text.is_empty() {
@@ -1363,15 +1364,13 @@ pub fn paint_vertical_gradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color3
 /// The hover or selection behind a chat-list row: a rounded card inset from
 /// the list's edges rather than a full-width band.
 pub fn row_highlight(ui: &Ui, palette: &Palette, rect: Rect, color: Color32) {
-    highlight_card(ui, palette, rect.shrink2(vec2(8.0, 2.0)), color);
+    highlight_card(ui, palette, rect.shrink2(vec2(10.0, 2.0)), color);
 }
 
 /// The card `row_highlight` paints, over `card` itself: the rail's lit and
 /// hovered plates look as the selected and hovered chat rows do.
 pub fn highlight_card(ui: &Ui, palette: &Palette, card: Rect, color: Color32) {
     let radius = CornerRadius::same(theme::RADIUS + 2);
-    // Over a vibrant window's material, a flat tint: the selected row
-    // stronger than the one under the pointer.
     if palette.vibrant() {
         let strength = if color == palette.surface_active {
             theme::TINT_SELECTED
@@ -1382,16 +1381,6 @@ pub fn highlight_card(ui: &Ui, palette: &Palette, card: Rect, color: Color32) {
             .rect_filled(card, radius, palette.tint(strength));
         return;
     }
-    // Raised like a message bubble, only more gently: the list sits on a
-    // flat panel, and a hovered row should not jump out.
-    let mut shadow = palette.bubble_shadow();
-    shadow.color = shadow.color.gamma_multiply(0.6);
-    ui.painter().add(shadow.as_shape(card, radius));
-    ui.painter().rect_filled(
-        card.translate(vec2(0.0, -theme::RAISED_EDGE)),
-        radius,
-        palette.raised_edge(color),
-    );
     ui.painter().rect_filled(card, radius, color);
 }
 
@@ -2071,11 +2060,16 @@ pub fn chip(ui: &mut Ui, palette: &Palette, label: &str) -> egui::Response {
     let galley =
         ui.painter()
             .layout_no_wrap(label.to_owned(), theme::medium(12.0), palette.secondary);
-    let size = galley.size() + vec2(20.0, 10.0);
+    let padding = if palette.vibrant() {
+        vec2(20.0, 10.0)
+    } else {
+        vec2(20.0, 12.0)
+    };
+    let size = galley.size() + padding;
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     if ui.is_rect_visible(rect) {
-        let radius = CornerRadius::from(rect.height() / 2.0);
         if palette.vibrant() {
+            let radius = CornerRadius::from(rect.height() / 2.0);
             // Glass over a vibrant conversation, as the header's.
             ui.painter().rect_filled(rect, radius, palette.glass());
             ui.painter()
@@ -2087,6 +2081,7 @@ pub fn chip(ui: &mut Ui, palette: &Palette, label: &str) -> egui::Response {
             );
             return response;
         }
+        let radius = CornerRadius::from(rect.height() / 2.0);
         // A dark panel all but vanished on a dark chat; halfway to the
         // incoming bubble's colour it reads as a chip without shouting.
         let fill = if palette.dark {
@@ -2729,7 +2724,7 @@ mod tests {
 
         let rect = Rect::from_min_size(pos2(100.0, 50.0), vec2(200.0, 40.0));
         let palette = Palette::light();
-        for (side, outside) in [(Side::Left, 92.0), (Side::Right, 308.0)] {
+        for (side, outside) in [(Side::Left, 100.0 - TAIL_WIDTH), (Side::Right, 300.0 + TAIL_WIDTH)] {
             let egui::Shape::Vec(shapes) =
                 bubble_shape(&palette, rect, palette.bubble_out, Some(side), 2.0, SCREEN)
             else {
