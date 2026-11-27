@@ -185,7 +185,7 @@ fn resolve_entry_keys(
                 raw.copy_from_slice(&secret);
                 Ok(raw)
             } else {
-                anyhow::bail!("The archive key in the OS keyring is invalid")
+                Err(anyhow::anyhow!("The archive key in the OS keyring is invalid"))
             };
 
             let raw_key = match unprotect_res {
